@@ -38,11 +38,10 @@ _PARSER_BOOLEAN_FIELDS = frozenset(
 )
 
 _PARSER_NULLABLE_BOOLEAN_FIELDS = frozenset({"can_access_full_video"})
-_PARSER_NULLABLE_INTEGER_FIELDS = frozenset(
-    {"available_length_ms", "timelength_ms"}
-)
+_PARSER_NULLABLE_INTEGER_FIELDS = frozenset({"available_length_ms", "timelength_ms"})
 _PARSER_SPECIAL_FIELDS = frozenset(
     {
+        "article_blocks",
         "audio_headers",
         "audio_urls",
         "hot_comments",
@@ -94,9 +93,7 @@ class ParserManager:
         groups: List[List[str]] = []
         for group_index, group in enumerate(value):
             if not isinstance(group, list):
-                raise TypeError(
-                    f"{field_name}[{group_index}] 必须是 URL 字符串列表"
-                )
+                raise TypeError(f"{field_name}[{group_index}] 必须是 URL 字符串列表")
             normalized_group: List[str] = []
             for url_index, candidate in enumerate(group):
                 if not isinstance(candidate, str) or not candidate.strip():
@@ -134,6 +131,24 @@ class ParserManager:
             names = ", ".join(sorted(misplaced_fields))
             raise ValueError(f"解析器不得写入边界或下游阶段字段: {names}")
 
+        if "article_blocks" in metadata:
+            blocks = metadata["article_blocks"]
+            if not isinstance(blocks, list):
+                raise TypeError("article_blocks 必须是列表")
+            for block in blocks:
+                if not isinstance(block, dict) or block.get("type") not in {
+                    "text",
+                    "image",
+                }:
+                    raise TypeError("正文块必须是文本或图片")
+                if block["type"] == "text" and not isinstance(block.get("text"), str):
+                    raise TypeError("正文文本必须是字符串")
+                if block["type"] == "image" and (
+                    type(block.get("index")) is not int
+                    or not 0 <= block["index"] < len(metadata.get("image_urls", []))
+                ):
+                    raise ValueError("正文图片索引无效")
+
         for field_name in _PARSER_STRING_FIELDS:
             if field_name not in metadata:
                 continue
@@ -169,9 +184,7 @@ class ParserManager:
                 if not isinstance(comment, dict) or any(
                     not isinstance(key, str) for key in comment
                 ):
-                    raise TypeError(
-                        f"hot_comments[{index}] 必须是字符串键的字典"
-                    )
+                    raise TypeError(f"hot_comments[{index}] 必须是字符串键的字典")
 
         canonical_url = metadata.get("url")
         if canonical_url in (None, ""):
@@ -201,7 +214,9 @@ class ParserManager:
             if cover_groups and video_count == 0:
                 raise ValueError("video_cover_urls 不得在没有视频时单独出现")
             if cover_groups and len(cover_groups) not in (1, video_count):
-                raise ValueError("video_cover_urls 必须为空、仅含一个通用封面组或与视频数量一致")
+                raise ValueError(
+                    "video_cover_urls 必须为空、仅含一个通用封面组或与视频数量一致"
+                )
             metadata["video_cover_urls"] = cover_groups
 
         metadata["image_headers"] = self._validate_headers(

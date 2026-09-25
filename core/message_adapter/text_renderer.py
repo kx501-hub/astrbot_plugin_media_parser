@@ -1,9 +1,10 @@
-"""文本元数据图片渲染器，负责将多个文本节点绘制为单张 PNG 图片。"""
+"""文本元数据图片渲染器，负责将文本节点绘制为分页 PNG 图片。"""
 
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 from pathlib import Path
 from typing import List
 
@@ -20,7 +21,7 @@ TEXT_SECTION_SEPARATOR = "-------------------------------------"
 NO_LINE_START_CHARS = "，。！？；：、,.!?;:)]}）】》"
 
 
-async def render_text_metadata_image(
+async def render_text_metadata_images(
     text: str,
     output_path: str,
     *,
@@ -30,8 +31,8 @@ async def render_text_metadata_image(
     style: str = DEFAULT_RENDER_STYLE,
     font_family: str = DEFAULT_RENDER_FONT_FAMILY,
     timeout_seconds: int = 60,
-) -> str:
-    """将文本元数据渲染为本地 PNG 文件。
+) -> List[str]:
+    """将文本元数据渲染为本地分页 PNG 文件。
 
     Args:
         text: 待渲染的文本内容。
@@ -44,7 +45,7 @@ async def render_text_metadata_image(
         timeout_seconds: 渲染超时时间（秒）。
 
     Returns:
-        已生成的图片绝对路径。
+        按阅读顺序排列的分页图片绝对路径。
 
     Raises:
         RuntimeError: Pillow 不可用、字体加载失败或图片未生成。
@@ -56,7 +57,7 @@ async def render_text_metadata_image(
     await ensure_default_fonts()
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.wait_for(
+    task = asyncio.create_task(
         asyncio.to_thread(
             _render_text_metadata_image_sync,
             str(text),
@@ -66,12 +67,19 @@ async def render_text_metadata_image(
             _normalize_font_size(font_size),
             _normalize_style(style),
             _normalize_font_family(font_family),
-        ),
-        timeout=max(10, int(timeout_seconds or 60)),
+        )
     )
-    if not output.is_file() or output.stat().st_size <= 0:
-        raise RuntimeError("文本元数据图片未生成有效文件")
-    return str(output)
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(task), timeout=max(10, int(timeout_seconds or 60))
+        )
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        try:
+            await task
+        finally:
+            for page in output.parent.glob(f"{output.stem}_*.png"):
+                page.unlink(missing_ok=True)
+        raise
 
 
 def _render_text_metadata_image_sync(
@@ -82,126 +90,99 @@ def _render_text_metadata_image_sync(
     font_size: int,
     style: str,
     font_family: str,
-) -> None:
-    """同步绘制文本元数据图片。"""
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-    except ImportError as exc:
-        raise RuntimeError("缺少 Pillow，无法渲染文本元数据图片") from exc
+) -> List[str]:
+    """按行分页绘制卡片，避免先分配超长画布再裁切。"""
+    from PIL import Image, ImageDraw, ImageFont
 
     palette = _style_palette(style)
-    regular_font = _load_font(ImageFont, font_size, font_family=font_family)
-    title_font = _load_font(
-        ImageFont,
-        max(font_size + 4, int(font_size * 1.35)),
-        True,
-        font_family,
-    )
-    label_font = _load_font(
-        ImageFont,
-        max(font_size, int(font_size * 1.05)),
-        True,
-        font_family,
-    )
-
-    probe = Image.new("RGB", (width, 200), palette["background"])
-    probe_draw = ImageDraw.Draw(probe)
-    margin = max(34, width // 12)
-    content_width = width - margin * 2
-    title_lines = _wrap_text(
-        probe_draw,
-        title.strip() or "媒体解析结果",
-        title_font,
-        content_width,
-    )
-    body_lines = _wrap_text_multiline(
-        probe_draw,
-        text,
-        regular_font,
-        content_width - 42,
-    )
-    title_line_height = _line_height(probe_draw, title_font, 1.35)
-    body_line_height = _line_height(probe_draw, regular_font, 1.55)
-    label_line_height = _line_height(probe_draw, label_font, 1.4)
-
-    top_padding = 46
-    title_gap = 30
-    card_top = top_padding + len(title_lines) * title_line_height + title_gap
-    card_bottom = card_top + 34 + len(body_lines) * body_line_height + 34
-    image = Image.new("RGB", (width, card_bottom + 46), palette["background"])
-    draw = ImageDraw.Draw(image)
-    _draw_background(draw, width, card_bottom + 46, palette["background_dot"])
-
-    for index, line in enumerate(title_lines):
-        line_width = _text_width(draw, line, title_font)
-        draw.text(
-            ((width - line_width) / 2, top_padding + index * title_line_height),
-            line,
-            font=title_font,
-            fill=palette["title"],
+    regular = _load_font(ImageFont, font_size, font_family=font_family)
+    heading = _load_font(ImageFont, font_size + 6, True, font_family)
+    small = _load_font(ImageFont, max(16, font_size - 4), font_family=font_family)
+    probe = ImageDraw.Draw(Image.new("RGB", (width, 1)))
+    margin = max(32, width // 16)
+    body_width = width - 2 * margin - 56
+    max_height = min(1800, width * 2)
+    body_top = 126
+    body_limit = max_height - body_top - 88
+    pages = []
+    rows = []
+    used = 0
+    # Measure every row before allocating a bounded page canvas.
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        value = raw.strip()
+        is_heading = bool(
+            re.match(r"^(精选评论|\d{2,}  |标题：|简介/正文：|翻译)", value)
         )
+        is_meta = value.startswith("赞 ")
+        font = heading if is_heading else small if is_meta else regular
+        color = palette["label_text"] if is_heading or is_meta else palette["body_text"]
+        if value == TEXT_SECTION_SEPARATOR:
+            block = [("", regular, color, 24, True)]
+        elif not value:
+            block = [("", regular, color, max(12, font_size // 2), False)]
+        else:
+            block = [
+                (line, font, color, _line_height(probe, font, 1.65), False)
+                for line in _wrap_text(probe, value, font, body_width)
+            ]
+        # Keep short paragraphs intact; split oversized paragraphs only between lines.
+        block_height = sum(row[3] for row in block)
+        if rows and used + block_height > body_limit and block_height <= body_limit:
+            pages.append((rows, used))
+            rows, used = [], 0
+        for row in block:
+            if rows and used + row[3] > body_limit:
+                pages.append((rows, used))
+                rows, used = [], 0
+            rows.append(row)
+            used += row[3]
+    if rows:
+        pages.append((rows, used))
 
-    card_x0 = margin
-    card_x1 = width - margin
-    draw.rounded_rectangle(
-        (card_x0 + 5, card_top + 5, card_x1 + 5, card_bottom + 5),
-        radius=16,
-        fill=palette["card_shadow"],
-    )
-    draw.rounded_rectangle(
-        (card_x0, card_top, card_x1, card_bottom),
-        radius=16,
-        fill=palette["card_fill"],
-        outline=palette["card_outline"],
-        width=2,
-    )
-
-    tape_width = min(150, max(100, width // 6))
-    tape_x0 = (width - tape_width) // 2
-    draw.rectangle(
-        (tape_x0, card_top - 13, tape_x0 + tape_width, card_top + 12),
-        fill=palette["tape_fill"],
-    )
-
-    body_x = card_x0 + 28
-    body_y = card_top + 24
-    for line in body_lines:
-        if line == TEXT_SECTION_SEPARATOR:
-            rule_y = body_y + max(8, body_line_height // 2)
-            draw.line(
-                (body_x, rule_y, card_x1 - 28, rule_y),
-                fill=palette["rule"],
-                width=2,
+    outputs = []
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        for index, (rows, used) in enumerate(pages, 1):
+            height = body_top + used + 88
+            image = Image.new("RGB", (width, height), palette["background"])
+            draw = ImageDraw.Draw(image)
+            draw.rounded_rectangle(
+                (margin, 36, margin + 6, 76), radius=3, fill=palette["title"]
             )
-            body_y += max(body_line_height // 2, label_line_height // 2)
-            continue
-
-        label, value = _split_label(line)
-        if label and value:
+            label = _wrap_text(draw, title, heading, width - 2 * margin - 24)[0]
+            draw.text((margin + 22, 39), label, font=heading, fill=palette["title"])
+            draw.rounded_rectangle(
+                (margin, 102, width - margin, height - 56),
+                radius=18,
+                fill=palette["card_fill"],
+                outline=palette["card_outline"],
+            )
+            y = body_top
+            for line, font, color, row_height, rule in rows:
+                if rule:
+                    draw.line(
+                        (margin + 28, y + 12, width - margin - 28, y + 12),
+                        fill=palette["rule"],
+                    )
+                else:
+                    draw.text((margin + 28, y), line, font=font, fill=color)
+                y += row_height
+            footer = f"{index:02d} / {len(pages):02d}"
             draw.text(
-                (body_x, body_y),
-                label,
-                font=label_font,
+                (width - margin - _text_width(draw, footer, small), height - 39),
+                footer,
+                font=small,
                 fill=palette["label_text"],
             )
-            label_width = _text_width(draw, label, label_font)
-            draw.text(
-                (body_x + label_width, body_y),
-                value,
-                font=regular_font,
-                fill=palette["body_text"],
-            )
-        else:
-            draw.text(
-                (body_x, body_y),
-                line,
-                font=regular_font,
-                fill=palette["body_text"],
-            )
-        body_y += body_line_height
-
-    output.parent.mkdir(parents=True, exist_ok=True)
-    image.save(output, format="PNG")
+            page = output.with_name(f"{output.stem}_{index:03d}.png")
+            outputs.append(str(page))
+            image.save(page, format="PNG")
+            image.close()
+    except (OSError, ValueError, RuntimeError):
+        for path in outputs:
+            Path(path).unlink(missing_ok=True)
+        raise
+    return outputs
 
 
 def _draw_background(
@@ -224,12 +205,7 @@ def _wrap_text_multiline(
 ) -> List[str]:
     """按原始换行拆分并对每行进行中文安全换行。"""
     lines: List[str] = []
-    raw_lines = (
-        str(text or "")
-        .replace("\r\n", "\n")
-        .replace("\r", "\n")
-        .split("\n")
-    )
+    raw_lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     for raw_line in raw_lines:
         if raw_line == "":
             lines.append("")
@@ -250,8 +226,9 @@ def _wrap_text(draw: object, text: str, font: object, max_width: int) -> List[st
         if not current or _text_width(draw, candidate, font) <= max_width:
             current = candidate
             continue
-        if char in NO_LINE_START_CHARS:
-            current = candidate
+        if char in NO_LINE_START_CHARS and len(current) > 1:
+            lines.append(current[:-1].rstrip())
+            current = current[-1] + char
             continue
         lines.append(current.rstrip())
         current = char.lstrip()
@@ -368,7 +345,7 @@ def _style_palette(style: str) -> dict[str, str]:
         "fresh": {
             "background": "#fdeef4",
             "background_dot": "#f4c1d2",
-            "card_fill": "#f9ded8",
+            "card_fill": "#ffffff",
             "card_outline": "#f4b7bd",
             "card_shadow": "#efb9b6",
             "tape_fill": "#fde6b6",
@@ -424,9 +401,7 @@ def _load_font(
     font_family: str = DEFAULT_RENDER_FONT_FAMILY,
 ) -> object:
     """按常见部署环境尝试加载中文字体，找不到时交由上层回退文本。"""
-    configured_path = str(
-        os.environ.get("ASTRBOT_MEDIA_PARSER_FONT", "") or ""
-    ).strip()
+    configured_path = str(os.environ.get("ASTRBOT_MEDIA_PARSER_FONT", "") or "").strip()
     family = _normalize_font_family(font_family)
     family_paths = {
         "noto_sans": (
@@ -455,9 +430,7 @@ def _load_font(
             if bold
             else "/usr/share/fonts/truetype/lxgw/LXGWWenKai-Regular.ttf",
         ),
-        "zcool_xiaowei": (
-            "/usr/share/fonts/truetype/zcool/ZCOOLXiaoWei-Regular.ttf",
-        ),
+        "zcool_xiaowei": ("/usr/share/fonts/truetype/zcool/ZCOOLXiaoWei-Regular.ttf",),
         "zcool_qingke": (
             "/usr/share/fonts/truetype/zcool/ZCOOLQingKeHuangYou-Regular.ttf",
         ),

@@ -5,7 +5,15 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.message_components import File, Nodes, Plain, Image, Node, Record, Reply
+from astrbot.api.message_components import (
+    File,
+    Nodes,
+    Plain,
+    Image,
+    Node,
+    Record,
+    Reply,
+)
 
 from ..logger import logger
 
@@ -112,6 +120,12 @@ class MessageSender:
         normal_metadata = [
             meta for meta in link_metadata if meta.get("is_normal", True)
         ]
+        ordered_node_ids = {
+            id(node)
+            for meta in normal_metadata
+            if meta.get("preserve_order")
+            for node in meta["link_nodes"]
+        }
         large_media_metadata = [
             meta for meta in link_metadata if meta.get("is_large_media", False)
         ]
@@ -119,7 +133,9 @@ class MessageSender:
             meta["link_nodes"] for meta in normal_metadata if meta.get("link_nodes")
         ]
         audio_nodes = [
-            node for link_nodes in normal_link_nodes for node in link_nodes
+            node
+            for link_nodes in normal_link_nodes
+            for node in link_nodes
             if isinstance(node, (Record, File))
         ]
         normal_link_nodes = [
@@ -128,7 +144,9 @@ class MessageSender:
         ]
         normal_link_nodes = [nodes for nodes in normal_link_nodes if nodes]
         large_media_link_nodes = [
-            meta["link_nodes"] for meta in large_media_metadata if meta.get("link_nodes")
+            meta["link_nodes"]
+            for meta in large_media_metadata
+            if meta.get("link_nodes")
         ]
         separator = "-------------------------------------"
         expected = 0
@@ -154,7 +172,9 @@ class MessageSender:
                     )
                 )
             for link_idx, link_nodes in enumerate(normal_link_nodes):
-                if is_pure_image_gallery(link_nodes):
+                if is_pure_image_gallery(link_nodes) and not any(
+                    id(node) in ordered_node_ids for node in link_nodes
+                ):
                     texts = [node for node in link_nodes if isinstance(node, Plain)]
                     images = [node for node in link_nodes if isinstance(node, Image)]
                     for text in texts:
@@ -190,7 +210,7 @@ class MessageSender:
         for node in audio_nodes:
             expected += 1
             # 适配器异常类型不固定，逐项收集发送结果，并保持发送顺序和取消传播。
-            result, = await asyncio.gather(
+            (result,) = await asyncio.gather(
                 self._send_single_node(event, node), return_exceptions=True
             )
             if isinstance(result, asyncio.CancelledError):
@@ -312,7 +332,7 @@ class MessageSender:
                 continue
             meta = self._metadata_for_link(link_metadata, link_idx)
             metadata_text_node = meta.get("metadata_text_node")
-            if is_pure_image_gallery(link_nodes):
+            if is_pure_image_gallery(link_nodes) and not meta.get("preserve_order"):
                 texts = [node for node in link_nodes if isinstance(node, Plain)]
                 images = [node for node in link_nodes if isinstance(node, Image)]
                 for text in texts:
