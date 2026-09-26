@@ -119,7 +119,7 @@ def _render_text_metadata_image_sync(
         if value == TEXT_SECTION_SEPARATOR:
             block = [("", regular, color, 24, True)]
         elif not value:
-            block = [("", regular, color, max(12, font_size // 2), False)]
+            block = [("", regular, color, max(24, round(font_size * 1.5)), False)]
         else:
             block = [
                 (line, font, color, _line_height(probe, font, 1.65), False)

@@ -8,6 +8,16 @@ const node = (tag, text = '', cls = '') => {
   return item;
 };
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const sectionSwitches = new Set([
+  'message.text_metadata.render_to_image',
+  'message.opening.enable',
+  'translation.enable',
+  'permissions.whitelist.enable',
+  'permissions.blacklist.enable',
+  'bilibili_enhanced.use_cookie',
+  'media_relay.enable',
+  'bilibili_enhanced.admin_assist.enable',
+]);
 const views = {
   platforms: ['平台管理', []],
   message: ['消息与排版', ['message']],
@@ -116,7 +126,15 @@ function control(field) {
     invalid.delete(field.path);
     edit(field, field.type === 'bool' ? input.checked : number ? Number(input.value) : field.type === 'list' ? input.value.split('\n').map(s => s.trim()).filter(Boolean) : input.value);
   });
-  wrap.append(title, input);
+  if (field.type === 'bool') {
+    wrap.classList.add('check-field');
+    if (sectionSwitches.has(field.path)) {
+      wrap.classList.add('section-switch');
+      title.textContent = '';
+      title.append(node('span', field.title), input, node('span', '', 'switch-track'));
+    } else title.prepend(input);
+    wrap.append(title);
+  } else wrap.append(title, input);
   if (field.hint) wrap.append(node('p', field.hint, 'hint'));
   if (field.type === 'list') wrap.append(node('p', '每行一项', 'hint'));
   if (field.secret) {
@@ -160,7 +178,7 @@ function render() {
     if (!groups.has(key)) {
       const panel = node('section', '', 'panel');
       panel.append(node('h3', snapshot.group_titles[key] || snapshot.groups[key.split('.')[0]], 'group-title'));
-      const grid = node('div', '', 'field-grid');
+      const grid = node('div', '', key === 'message.hot_comments' ? 'field-grid check-list' : 'field-grid');
       panel.append(grid); groups.set(key, grid); $('editor').append(panel);
     }
     groups.get(key).append(control(field));
