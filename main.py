@@ -105,6 +105,15 @@ class VideoParserPlugin(Star):
             command=cfg.bilibili.admin_cookie_update_command,
         )
         self._start_expired_cache_cleanup()
+        self._page_api = None
+        try:
+            from .page_api import MediaParserPageAPI
+        except ModuleNotFoundError as exc:
+            if exc.name != "astrbot.api.web":
+                raise
+            logger.warning("当前 AstrBot 不支持 Pages 配置接口，请继续使用插件基础配置")
+        else:
+            self._page_api = MediaParserPageAPI(self, config)
 
     async def initialize(self) -> None:
         """插件加载时检查并补全图片渲染字体。"""
@@ -118,6 +127,8 @@ class VideoParserPlugin(Star):
             )
 
     async def terminate(self):
+        if self._page_api is not None:
+            await self._page_api.close()
         await self._shutdown_expired_cache_cleanup()
         await self._shutdown_delayed_cleanups()
         await self.admin_cookie_assist.shutdown()
