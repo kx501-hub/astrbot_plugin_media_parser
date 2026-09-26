@@ -5,15 +5,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.message_components import (
-    File,
-    Nodes,
-    Plain,
-    Image,
-    Node,
-    Record,
-    Reply,
-)
+from astrbot.api.message_components import File, Nodes, Plain, Image, Node, Record, Reply
 
 from ..logger import logger
 
@@ -105,7 +97,7 @@ class MessageSender:
         sender_name: str,
         sender_id: Any,
         large_video_threshold_mb: float = 0.0,
-        text_metadata_image: str = "",
+        text_metadata_image: str | List[str] = "",
     ):
         """使用 Nodes 合并转发发送结果。
 
@@ -115,7 +107,7 @@ class MessageSender:
             sender_name: 发送者名称
             sender_id: 发送者ID
             large_video_threshold_mb: 大视频阈值(MB)
-            text_metadata_image: 已渲染的文本元数据图片路径
+            text_metadata_image: 已渲染的文本元数据图片路径或按阅读顺序排列的路径列表
         """
         normal_metadata = [
             meta for meta in link_metadata if meta.get("is_normal", True)
@@ -133,9 +125,7 @@ class MessageSender:
             meta["link_nodes"] for meta in normal_metadata if meta.get("link_nodes")
         ]
         audio_nodes = [
-            node
-            for link_nodes in normal_link_nodes
-            for node in link_nodes
+            node for link_nodes in normal_link_nodes for node in link_nodes
             if isinstance(node, (Record, File))
         ]
         normal_link_nodes = [
@@ -144,26 +134,29 @@ class MessageSender:
         ]
         normal_link_nodes = [nodes for nodes in normal_link_nodes if nodes]
         large_media_link_nodes = [
-            meta["link_nodes"]
-            for meta in large_media_metadata
-            if meta.get("link_nodes")
+            meta["link_nodes"] for meta in large_media_metadata if meta.get("link_nodes")
         ]
         separator = "-------------------------------------"
         expected = 0
         succeeded = 0
         errors: list[Exception] = []
-        rendered_image = None
-        if text_metadata_image:
+        rendered_images = []
+        references = (
+            [text_metadata_image]
+            if isinstance(text_metadata_image, str)
+            else text_metadata_image
+        )
+        for reference in filter(None, references):
             try:
-                rendered_image = self._image_from_reference(text_metadata_image)
+                rendered_images.append(self._image_from_reference(reference))
             except Exception as exc:
                 expected += 1
                 errors.append(exc)
                 logger.warning(f"构建文本元数据图片节点失败: {exc}")
 
-        if normal_link_nodes or rendered_image is not None:
+        if normal_link_nodes or rendered_images:
             flat_nodes = []
-            if rendered_image is not None:
+            for rendered_image in rendered_images:
                 flat_nodes.append(
                     Node(
                         name=sender_name,
@@ -210,7 +203,7 @@ class MessageSender:
         for node in audio_nodes:
             expected += 1
             # 适配器异常类型不固定，逐项收集发送结果，并保持发送顺序和取消传播。
-            (result,) = await asyncio.gather(
+            result, = await asyncio.gather(
                 self._send_single_node(event, node), return_exceptions=True
             )
             if isinstance(result, asyncio.CancelledError):
@@ -293,7 +286,7 @@ class MessageSender:
         *,
         quote_user_message: bool = False,
         quote_message_id: str = "",
-        text_metadata_image: str = "",
+        text_metadata_image: str | List[str] = "",
     ) -> None:
         """发送非聚合结果（逐项独立发送）。
 
@@ -303,17 +296,22 @@ class MessageSender:
             link_metadata: 每条链接的构建辅助信息
             quote_user_message: 文本元数据是否引用对应的用户消息
             quote_message_id: 被引用的用户消息 ID
-            text_metadata_image: 已渲染的文本元数据图片路径
+            text_metadata_image: 已渲染的文本元数据图片路径或按阅读顺序排列的路径列表
         """
         separator = "-------------------------------------"
         quote_message_id = str(quote_message_id or "").strip()
         expected = 0
         succeeded = 0
         errors: list[Exception] = []
-        if text_metadata_image:
+        references = (
+            [text_metadata_image]
+            if isinstance(text_metadata_image, str)
+            else text_metadata_image
+        )
+        for reference in filter(None, references):
             expected += 1
             try:
-                image_node = self._image_from_reference(text_metadata_image)
+                image_node = self._image_from_reference(reference)
                 await self._send_single_node(
                     event,
                     image_node,

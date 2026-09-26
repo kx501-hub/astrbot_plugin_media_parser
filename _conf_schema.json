@@ -466,7 +466,21 @@
                     "render_to_image": {
                         "description": "将文本元数据渲染为图片",
                         "type": "bool",
-                        "hint": "开启后按阅读顺序将正文、热评和翻译渲染为分页卡片，每页高度不超过 1800 像素；公众号图片保留在原文位置，渲染失败时保留文字。",
+                        "hint": "开启后将文本渲染为图片；渲染失败时保留文字。",
+                        "default": false
+                    },
+                    "paginate_images": {
+                        "description": "长图自动分页",
+                        "type": "bool",
+                        "condition": {"render_to_image": true},
+                        "hint": "默认关闭。开启后将生成的文字图片按行分页，每页不超过 1800 像素，避免部分平台限制超长图片上传。",
+                        "default": false
+                    },
+                    "separate_text_sections": {
+                        "description": "正文、热评、翻译分开发送",
+                        "type": "bool",
+                        "condition": {"render_to_image": true},
+                        "hint": "默认关闭，图片模式下合并文本内容。开启后按正文、热评和翻译分别渲染发送。",
                         "default": false
                     },
                     "render_style": {
@@ -1107,6 +1121,13 @@
         "type": "object",
         "hint": "支持公众号文章及视频号分享链接。公众号图文无需 Cookie；图片和视频号视频下载需要可用缓存目录。",
         "items": {
+            "article_layout": {
+                "description": "公众号文章排版",
+                "type": "string",
+                "hint": "正文与图片分开发送：默认输出方式；按原文图文穿插：将图片放回对应段落之间。仅对公众号文章生效，视频号不受影响。",
+                "options": ["正文与图片分开发送", "按原文图文穿插"],
+                "default": "正文与图片分开发送"
+            },
             "yuanbao_cookie": {
                 "description": "腾讯元宝 Cookie",
                 "type": "string",

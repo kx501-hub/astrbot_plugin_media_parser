@@ -10,6 +10,8 @@ const node = (tag, text = '', cls = '') => {
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sectionSwitches = new Set([
   'message.text_metadata.render_to_image',
+  'message.text_metadata.paginate_images',
+  'message.text_metadata.separate_text_sections',
   'message.opening.enable',
   'translation.enable',
   'permissions.whitelist.enable',
@@ -223,26 +225,56 @@ function preview() {
   target.replaceChildren();
   $('advice').replaceChildren();
   const mode = value(`parsers.${platform}`);
+  const asImage = value('message.text_metadata.render_to_image');
+  const paginate = value('message.text_metadata.paginate_images');
+  const separate = value('message.text_metadata.separate_text_sections');
+  const interleaved = platform === 'wechat' && value('wechat.article_layout') === '按原文图文穿插'
+    && mode !== '仅富媒体' && value('message.text_metadata.show_description');
   if (mode === '关闭') { target.append(node('p', '此平台已关闭自动解析。', 'empty')); return; }
   if (value('message.opening.enable')) target.append(node('div', value('message.opening.content'), 'bubble'));
   if (mode !== '仅富媒体') {
-    const card = node('div', '', value('message.text_metadata.render_to_image') ? 'bubble image-preview' : 'bubble');
+    const card = node('div', '', asImage ? 'bubble image-preview' : 'bubble');
     const styles = { '科技感': 'tech', '专业严肃': 'formal', '温和卡片': 'warm' };
-    if (value('message.text_metadata.render_to_image')) {
+    if (asImage) {
       card.classList.add(styles[value('message.text_metadata.render_style')] || 'fresh');
       card.style.fontSize = `${Math.min(28, value('message.text_metadata.render_font_size'))}px`;
     }
     for (const [key, text] of [['show_title', '周末散步 · 城市里的小小发现'], ['show_author', '作者：旅行记录员'], ['show_timestamp', '发布时间：2026-09-26'], ['show_description', '放慢脚步，记录沿途的光影与声音。'], ['show_original_link', '原文链接：https://example.com/media']]) {
       if (value(`message.text_metadata.${key}`)) card.append(node('p', text));
     }
-    if (value('message.hot_comments.count') > 0 && value(`message.hot_comments.${platform}`)) card.append(node('p', `热评示例：这一刻好美！（最多 ${value('message.hot_comments.count')} 条）`));
     target.append(card);
+    if (interleaved) {
+      if (mode !== '仅文本') target.append(node('div', '▧ 公众号正文配图', 'bubble media'));
+      const continuation = card.cloneNode(false);
+      continuation.append(node('p', '配图之后的正文：走到山间，阳光穿过树叶。'));
+      continuation.append(node('p', '另一个段落：停下来喝一杯茶，再继续往前走。'));
+      target.append(continuation);
+    }
+    if (value('message.hot_comments.count') > 0 && value(`message.hot_comments.${platform}`)) {
+      const comments = asImage && !separate && !interleaved ? card : card.cloneNode(false);
+      comments.append(node('p', `热评（最多 ${value('message.hot_comments.count')} 条）`));
+      comments.append(node('strong', '01  旅行爱好者'));
+      comments.append(node('p', '这一刻好美！'));
+      comments.append(node('small', '赞 128 · 刚刚'));
+      if (comments !== card) target.append(comments);
+    }
+    if (value('translation.enable') && (value('message.text_metadata.show_title') || value('message.text_metadata.show_description'))) {
+      const translation = asImage && !separate && !interleaved ? card : card.cloneNode(false);
+      translation.append(node('p', `翻译（${value('translation.target_language')}）`));
+      translation.append(node('p', '这里展示标题或正文的翻译内容，示例不调用模型。'));
+      if (translation !== card) target.append(translation);
+    }
   }
-  if (mode !== '仅文本') target.append(node('div', value('message.media_display.video_cover_only') ? '▧ 视频封面示意' : '▶ 媒体内容示意', 'bubble media'));
+  if (mode !== '仅文本' && !interleaved) target.append(node('div', platform === 'wechat' ? '▧ 公众号配图（集中发送）' : value('message.media_display.video_cover_only') ? '▧ 视频封面示意' : '▶ 媒体内容示意', 'bubble media'));
   $('advice').replaceChildren(...[
     `消息聚合：${value('message.packing.mode')}`,
     value('translation.enable') ? `翻译已启用：${value('translation.target_language')}，${value('translation.content_scope')}。示例不调用模型。` : '翻译未启用',
     value('message.text_metadata.quote_user_message') ? '会引用用户消息' : '独立回复消息',
+    ...(asImage ? [
+      paginate ? '长图自动分页已启用' : '长图自动分页未启用',
+      interleaved ? '文字按配图位置分段渲染' : separate ? '文字栏目分开渲染' : '文字栏目合并渲染',
+    ] : ['纯文字分开发送']),
+    ...(platform === 'wechat' ? [`公众号文章排版：${value('wechat.article_layout')}`] : []),
   ].map(text => node('p', text, 'note')));
 }
 async function operation(action) {

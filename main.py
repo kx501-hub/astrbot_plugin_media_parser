@@ -32,6 +32,8 @@ from .core.message_adapter.sender import MessageDeliveryError, MessageSender
 from .core.message_adapter.node_builder import (
     build_all_nodes,
     build_translation_nodes_for_all,
+    collect_text_metadata,
+    strip_text_metadata_nodes,
     summarize_node_counts,
 )
 from .core.message_adapter.text_renderer import render_text_metadata_images
@@ -415,17 +417,26 @@ class VideoParserPlugin(Star):
         build_result,
         translation_nodes,
         cfg,
-    ) -> None:
-        """按阅读顺序原位替换文本节点，分页失败时保留文字。"""
+    ) -> list[str]:
+        """按阅读顺序将文本渲染为图片，失败时保留原文字。"""
         if not getattr(cfg.message.text_metadata, "render_to_image", False):
-            return
+            return []
+        combine_text = not cfg.message.text_metadata.separate_text_sections and not any(
+            meta.get("preserve_order") for meta in build_result.link_metadata
+        )
+        node_groups = [*build_result.all_link_nodes, *(translation_nodes or [])]
+        if combine_text:
+            text = collect_text_metadata(build_result.all_link_nodes, translation_nodes)
+            if not text:
+                return []
+            node_groups = [[Plain(text)]]
         cache_root = str(cfg.download.cache_dir or "").strip()
         image_dir = (
             Path(cache_root).resolve() / "rendered_text"
             if cache_root
             else Path(tempfile.gettempdir()).resolve() / "astrbot_media_parser"
         )
-        for nodes in [*build_result.all_link_nodes, *(translation_nodes or [])]:
+        for nodes in node_groups:
             rendered_nodes = []
             for node in nodes:
                 if not isinstance(node, Plain) or not node.text.strip():
@@ -435,15 +446,17 @@ class VideoParserPlugin(Star):
                     paths = await render_text_metadata_images(
                         node.text,
                         str(image_dir / f"metadata_{uuid.uuid4().hex}.png"),
-                        title="精选评论"
-                        if node.text.startswith("精选评论")
-                        else "媒体解析",
+                        title="热评"
+                        if node.text.startswith("热评")
+                        else "媒体解析结果",
                         style=cfg.message.text_metadata.render_style,
                         font_family=cfg.message.text_metadata.render_font_family,
                         font_size=cfg.message.text_metadata.render_font_size,
+                        paginate_images=cfg.message.text_metadata.paginate_images,
                     )
                     build_result.temp_files.extend(paths)
                     images = []
+                    references = []
                     for path in paths:
                         reference = path
                         if cfg.relay.enabled:
@@ -453,11 +466,19 @@ class VideoParserPlugin(Star):
                                 cfg.relay.file_token_ttl,
                             )
                             reference = token or path
+                        references.append(reference)
                         images.append(
                             Image.fromURL(reference)
                             if reference.startswith(("http://", "https://"))
                             else Image.fromFileSystem(reference)
                         )
+                    if combine_text:
+                        strip_text_metadata_nodes(
+                            build_result.all_link_nodes, translation_nodes
+                        )
+                        for metadata in build_result.link_metadata:
+                            metadata["metadata_text_node"] = None
+                        return references
                     rendered_nodes.extend(images)
                     for metadata in build_result.link_metadata:
                         if metadata["link_nodes"] is nodes:
@@ -473,9 +494,10 @@ class VideoParserPlugin(Star):
                     ValueError,
                     asyncio.TimeoutError,
                 ) as exc:
-                    self.logger.warning(f"文本图片分页失败，保留原文本: {exc}")
+                    self.logger.warning(f"文本图片渲染失败，保留原文本: {exc}")
                     rendered_nodes.append(node)
             nodes[:] = rendered_nodes
+        return []
 
     def _metadata_has_output_candidate(self, metadata: Dict[str, Any]) -> bool:
         """判断 metadata 在当前输出策略下是否可能构建出节点。"""
@@ -484,9 +506,7 @@ class VideoParserPlugin(Star):
 
         text_enabled = bool(metadata.get("_enable_text_metadata", True))
         rich_enabled = bool(metadata.get("_enable_rich_media", True))
-        has_media = any(
-            metadata.get(key) for key in ("video_urls", "image_urls", "audio_urls")
-        )
+        has_media = any(metadata.get(key) for key in ("video_urls", "image_urls", "audio_urls"))
         has_text = (
             self._has_text_metadata(metadata)
             or bool(metadata.get("access_message"))
@@ -573,7 +593,6 @@ class VideoParserPlugin(Star):
                 for metadata in metadata_list
             )
             if should_process_rich_media:
-
                 async def process_single(metadata: Dict[str, Any]):
                     if metadata.get("error") or not metadata.get(
                         "_enable_rich_media", True
@@ -672,7 +691,7 @@ class VideoParserPlugin(Star):
                 )
                 return
 
-            await self._render_text_metadata_output(
+            text_metadata_image_ref = await self._render_text_metadata_output(
                 build_result,
                 translation_nodes,
                 cfg,
@@ -684,6 +703,8 @@ class VideoParserPlugin(Star):
             ]
             aggregatable_nodes.extend(translation_nodes)
             node_counts = summarize_node_counts(aggregatable_nodes)
+            node_counts["image_count"] += len(text_metadata_image_ref)
+            node_counts["node_count"] += len(text_metadata_image_ref)
             should_aggregate_nodes = cfg.message.aggregation.should_aggregate_nodes(
                 **node_counts
             )
@@ -704,6 +725,7 @@ class VideoParserPlugin(Star):
                     sender_name,
                     sender_id,
                     cfg.download.large_video_threshold_mb,
+                    text_metadata_image=text_metadata_image_ref,
                 )
             else:
                 await self.message_sender.send_individual_results(
@@ -712,6 +734,7 @@ class VideoParserPlugin(Star):
                     build_result.link_metadata,
                     quote_user_message=(cfg.message.text_metadata.quote_user_message),
                     quote_message_id=quote_source_message_id,
+                    text_metadata_image=text_metadata_image_ref,
                 )
 
             try:
@@ -772,16 +795,13 @@ class VideoParserPlugin(Star):
                 )
                 if all_files:
                     has_audio_files = bool(
-                        not zip_requested
-                        and build_result is not None
+                        not zip_requested and build_result is not None
                         and cfg.message.media_display.audio_send_mode == "文件"
                         and any(
-                            any(
-                                (metadata.get("file_paths") or [])[
-                                    len(metadata.get("video_urls") or [])
-                                    + len(metadata.get("image_urls") or []) :
-                                ]
-                            )
+                            any((metadata.get("file_paths") or [])[
+                                len(metadata.get("video_urls") or [])
+                                + len(metadata.get("image_urls") or []):
+                            ])
                             for metadata in processed_metadata_list
                         )
                     )
@@ -791,8 +811,7 @@ class VideoParserPlugin(Star):
                         # 同一缓存目录共用过期标记，音频文件与封面须采用同一个有效期。
                         delay = (
                             max(300, cfg.relay.file_token_ttl)
-                            if has_audio_files
-                            else cfg.relay.file_token_ttl
+                            if has_audio_files else cfg.relay.file_token_ttl
                         )
                         self._schedule_delayed_cleanup(all_files, delay)
                     else:

@@ -1,4 +1,4 @@
-"""文本元数据图片渲染器，负责将文本节点绘制为分页 PNG 图片。"""
+"""文本元数据图片渲染器，负责将文本节点绘制为 PNG 图片。"""
 
 from __future__ import annotations
 
@@ -31,8 +31,9 @@ async def render_text_metadata_images(
     style: str = DEFAULT_RENDER_STYLE,
     font_family: str = DEFAULT_RENDER_FONT_FAMILY,
     timeout_seconds: int = 60,
+    paginate_images: bool = False,
 ) -> List[str]:
-    """将文本元数据渲染为本地分页 PNG 文件。
+    """将文本元数据渲染为本地 PNG 文件。
 
     Args:
         text: 待渲染的文本内容。
@@ -43,9 +44,10 @@ async def render_text_metadata_images(
         style: 图片渲染风格。
         font_family: 图片字体族。
         timeout_seconds: 渲染超时时间（秒）。
+        paginate_images: 是否按最大高度自动分页，与样式及内容分组独立。
 
     Returns:
-        按阅读顺序排列的分页图片绝对路径。
+        按阅读顺序排列的图片绝对路径。
 
     Raises:
         RuntimeError: Pillow 不可用、字体加载失败或图片未生成。
@@ -67,6 +69,7 @@ async def render_text_metadata_images(
             _normalize_font_size(font_size),
             _normalize_style(style),
             _normalize_font_family(font_family),
+            paginate_images,
         )
     )
     try:
@@ -90,8 +93,9 @@ def _render_text_metadata_image_sync(
     font_size: int,
     style: str,
     font_family: str,
+    paginate_images: bool = False,
 ) -> List[str]:
-    """按行分页绘制卡片，避免先分配超长画布再裁切。"""
+    """按行绘制卡片，并在启用分页时限制单页画布高度。"""
     from PIL import Image, ImageDraw, ImageFont
 
     palette = _style_palette(style)
@@ -103,16 +107,14 @@ def _render_text_metadata_image_sync(
     body_width = width - 2 * margin - 56
     max_height = min(1800, width * 2)
     body_top = 126
-    body_limit = max_height - body_top - 88
+    body_limit = max_height - body_top - 88 if paginate_images else float("inf")
     pages = []
     rows = []
     used = 0
-    # Measure every row before allocating a bounded page canvas.
+    # 先测量各行高度，再按分页结果创建画布。
     for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         value = raw.strip()
-        is_heading = bool(
-            re.match(r"^(精选评论|\d{2,}  |标题：|简介/正文：|翻译)", value)
-        )
+        is_heading = bool(re.match(r"^(热评|\d{2,}  |标题：|简介/正文：|翻译)", value))
         is_meta = value.startswith("赞 ")
         font = heading if is_heading else small if is_meta else regular
         color = palette["label_text"] if is_heading or is_meta else palette["body_text"]
@@ -125,7 +127,7 @@ def _render_text_metadata_image_sync(
                 (line, font, color, _line_height(probe, font, 1.65), False)
                 for line in _wrap_text(probe, value, font, body_width)
             ]
-        # Keep short paragraphs intact; split oversized paragraphs only between lines.
+        # 短段落尽量保持完整，超长段落仅在行与行之间分页。
         block_height = sum(row[3] for row in block)
         if rows and used + block_height > body_limit and block_height <= body_limit:
             pages.append((rows, used))
@@ -146,6 +148,7 @@ def _render_text_metadata_image_sync(
             height = body_top + used + 88
             image = Image.new("RGB", (width, height), palette["background"])
             draw = ImageDraw.Draw(image)
+            _draw_background(draw, width, height, palette["background_dot"])
             draw.rounded_rectangle(
                 (margin, 36, margin + 6, 76), radius=3, fill=palette["title"]
             )
@@ -165,7 +168,15 @@ def _render_text_metadata_image_sync(
                         fill=palette["rule"],
                     )
                 else:
-                    draw.text((margin + 28, y), line, font=font, fill=color)
+                    label, value = _split_label(line)
+                    if label and value and font is regular:
+                        draw.text((margin + 28, y), label, font=font, fill=palette["label_text"])
+                        draw.text(
+                            (margin + 28 + _text_width(draw, label, font), y),
+                            value, font=font, fill=color,
+                        )
+                    else:
+                        draw.text((margin + 28, y), line, font=font, fill=color)
                 y += row_height
             footer = f"{index:02d} / {len(pages):02d}"
             draw.text(
@@ -195,24 +206,6 @@ def _draw_background(
     for y in range(7, height, 14):
         for x in range(7, width, 14):
             draw.ellipse((x - 1, y - 1, x + 1, y + 1), fill=dot_color)
-
-
-def _wrap_text_multiline(
-    draw: object,
-    text: str,
-    font: object,
-    max_width: int,
-) -> List[str]:
-    """按原始换行拆分并对每行进行中文安全换行。"""
-    lines: List[str] = []
-    raw_lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    for raw_line in raw_lines:
-        if raw_line == "":
-            lines.append("")
-            continue
-        wrapped = _wrap_text(draw, raw_line, font, max_width)
-        lines.extend(wrapped)
-    return lines or ["（无文本内容）"]
 
 
 def _wrap_text(draw: object, text: str, font: object, max_width: int) -> List[str]:
@@ -345,7 +338,7 @@ def _style_palette(style: str) -> dict[str, str]:
         "fresh": {
             "background": "#fdeef4",
             "background_dot": "#f4c1d2",
-            "card_fill": "#ffffff",
+            "card_fill": "#f9ded8",
             "card_outline": "#f4b7bd",
             "card_shadow": "#efb9b6",
             "tape_fill": "#fde6b6",
@@ -401,7 +394,9 @@ def _load_font(
     font_family: str = DEFAULT_RENDER_FONT_FAMILY,
 ) -> object:
     """按常见部署环境尝试加载中文字体，找不到时交由上层回退文本。"""
-    configured_path = str(os.environ.get("ASTRBOT_MEDIA_PARSER_FONT", "") or "").strip()
+    configured_path = str(
+        os.environ.get("ASTRBOT_MEDIA_PARSER_FONT", "") or ""
+    ).strip()
     family = _normalize_font_family(font_family)
     family_paths = {
         "noto_sans": (
@@ -430,7 +425,9 @@ def _load_font(
             if bold
             else "/usr/share/fonts/truetype/lxgw/LXGWWenKai-Regular.ttf",
         ),
-        "zcool_xiaowei": ("/usr/share/fonts/truetype/zcool/ZCOOLXiaoWei-Regular.ttf",),
+        "zcool_xiaowei": (
+            "/usr/share/fonts/truetype/zcool/ZCOOLXiaoWei-Regular.ttf",
+        ),
         "zcool_qingke": (
             "/usr/share/fonts/truetype/zcool/ZCOOLQingKeHuangYou-Regular.ttf",
         ),

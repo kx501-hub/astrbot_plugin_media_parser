@@ -11,42 +11,13 @@ from ....types import MediaMetadata
 
 
 VOID_TAGS = {
-    "area",
-    "base",
-    "br",
-    "col",
-    "embed",
-    "hr",
-    "img",
-    "input",
-    "link",
-    "meta",
-    "param",
-    "source",
-    "track",
-    "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
 }
 BLOCK_TAGS = {
-    "article",
-    "blockquote",
-    "br",
-    "div",
-    "figcaption",
-    "figure",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "hr",
-    "li",
-    "ol",
-    "p",
-    "section",
-    "table",
-    "tr",
-    "ul",
+    "article", "blockquote", "br", "div", "figcaption", "figure", "h1",
+    "h2", "h3", "h4", "h5", "h6", "hr", "li", "ol", "p", "section",
+    "table", "tr", "ul",
 }
 IGNORED_TAGS = {"script", "style", "noscript", "template"}
 FIELD_IDS = {
@@ -89,15 +60,15 @@ def _append_js_escape(source: str, index: int, value: List[str]) -> int:
     if escaped in JS_SIMPLE_ESCAPES:
         value.append(JS_SIMPLE_ESCAPES[escaped])
         return index + 2
-    hex_digits = source[index + 2 : index + 4]
+    hex_digits = source[index + 2:index + 4]
     if escaped == "x" and re.fullmatch(r"[0-9A-Fa-f]{2}", hex_digits):
         value.append(chr(int(hex_digits, 16)))
         return index + 4
-    unicode_digits = source[index + 2 : index + 6]
+    unicode_digits = source[index + 2:index + 6]
     if escaped == "u" and re.fullmatch(r"[0-9A-Fa-f]{4}", unicode_digits):
         codepoint = int(unicode_digits, 16)
-        next_escape = source[index + 6 : index + 8]
-        next_digits = source[index + 8 : index + 12]
+        next_escape = source[index + 6:index + 8]
+        next_digits = source[index + 8:index + 12]
         if (
             0xD800 <= codepoint <= 0xDBFF
             and next_escape == "\\u"
@@ -105,13 +76,15 @@ def _append_js_escape(source: str, index: int, value: List[str]) -> int:
         ):
             low = int(next_digits, 16)
             if 0xDC00 <= low <= 0xDFFF:
-                codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + low - 0xDC00
+                codepoint = (
+                    0x10000 + ((codepoint - 0xD800) << 10) + low - 0xDC00
+                )
                 value.append(chr(codepoint))
                 return index + 12
         value.append(chr(codepoint))
         return index + 6
     if escaped == "\r":
-        return index + 3 if source[index + 2 : index + 3] == "\n" else index + 2
+        return index + 3 if source[index + 2:index + 3] == "\n" else index + 2
     if escaped == "\n":
         return index + 2
     value.append(escaped)
@@ -303,9 +276,7 @@ def _property_scalar(source: str, property_name: str) -> str:
 def _normalize_image_url(source_url: str, value: str) -> str:
     """校验并补全文章图片地址。"""
     try:
-        image_url = (
-            urljoin(source_url, unescape(value.strip())) if value.strip() else ""
-        )
+        image_url = urljoin(source_url, unescape(value.strip())) if value.strip() else ""
         parsed = urlparse(image_url)
     except ValueError:
         return ""
@@ -343,7 +314,9 @@ def _gallery_images(cgi_data: str, source_url: str) -> List[List[str]]:
         if object_end is None or object_end > end:
             return []
         item = raw_list[index:object_end]
-        image_url = _normalize_image_url(source_url, _property_string(item, "cdn_url"))
+        image_url = _normalize_image_url(
+            source_url, _property_string(item, "cdn_url")
+        )
         if image_url and image_url not in seen:
             seen.add(image_url)
             images.append([image_url])
@@ -362,7 +335,9 @@ class _SummaryHTMLParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: List[str] = []
 
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(
+        self, tag: str, attrs: List[Tuple[str, Optional[str]]]
+    ) -> None:
         """保留块标签和换行标签的文本边界。"""
         if tag in BLOCK_TAGS:
             self.parts.append("\n")
@@ -401,7 +376,9 @@ class _ArticleHTMLParser(HTMLParser):
         self._seen_images = set()
         self._stack: List[Tuple[str, str, bool]] = []
 
-    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(
+        self, tag: str, attrs: List[Tuple[str, Optional[str]]]
+    ) -> None:
         """读取字段容器、元标签与正文图片。
 
         Args:
@@ -501,7 +478,9 @@ class _ArticleHTMLParser(HTMLParser):
 
 def _publication_date(page: str, visible_date: str, cgi_data: str) -> str:
     """从文章时间节点或明确的发布时间变量读取日期。"""
-    date_match = re.search(r"(\d{4})[-年/](\d{1,2})[-月/](\d{1,2})日?", visible_date)
+    date_match = re.search(
+        r"(\d{4})[-年/](\d{1,2})[-月/](\d{1,2})日?", visible_date
+    )
     if date_match:
         try:
             return datetime(*map(int, date_match.groups())).strftime("%Y-%m-%d")
@@ -517,7 +496,9 @@ def _publication_date(page: str, visible_date: str, cgi_data: str) -> str:
             pass
     # publish_time 也出现在关联文章的数据中，只匹配本页明确的 JS 变量。
     for variable in ("ct", "create_time", "oriCreateTime"):
-        match = re.search(rf"\bvar\s+{variable}\s*=\s*['\"]?(\d{{10}})\b", page)
+        match = re.search(
+            rf"\bvar\s+{variable}\s*=\s*['\"]?(\d{{10}})\b", page
+        )
         if match:
             try:
                 return datetime.fromtimestamp(
@@ -560,12 +541,8 @@ def parse_article_page(page: str, source_url: str) -> MediaMetadata:
         if any(
             phrase in visible_text
             for phrase in (
-                "内容已被删除",
-                "该内容已被发布者删除",
-                "内容已删除",
-                "内容无法查看",
-                "链接已过期",
-                "内容不存在",
+                "内容已被删除", "该内容已被发布者删除", "内容已删除",
+                "内容无法查看", "链接已过期", "内容不存在",
             )
         ):
             raise RuntimeError("微信公众号文章已删除、失效或无法查看")
@@ -576,8 +553,9 @@ def parse_article_page(page: str, source_url: str) -> MediaMetadata:
         or parser.meta.get("og:title", "")
         or _property_string(cgi_data, "title")
     )
-    account = _clean_text("".join(parser.fields["account"])) or _property_string(
-        cgi_data, "nick_name"
+    account = (
+        _clean_text("".join(parser.fields["account"]))
+        or _property_string(cgi_data, "nick_name")
     )
     byline = parser.meta.get("author") or parser.meta.get("og:article:author", "")
     author = (

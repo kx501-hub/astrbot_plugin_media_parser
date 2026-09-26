@@ -112,7 +112,7 @@ class PresentationTests(unittest.TestCase):
             with patch.object(ImageDraw.ImageDraw, 'text', record):
                 paths = renderer._render_text_metadata_image_sync(
                     '\n\n'.join(f'段落{i:03d}：' + '中文正文测试' * 12 for i in range(90)),
-                    Path(directory) / 'article.png', '公众号文章', 960, 24, 'card', 'noto_sans')
+                    Path(directory) / 'article.png', '公众号文章', 960, 24, 'card', 'noto_sans', True)
             self.assertGreater(len(paths), 2)
             for path in paths:
                 with PILImage.open(path) as image:
@@ -148,7 +148,7 @@ class AsyncPresentationTests(unittest.IsolatedAsyncioTestCase):
         result = types.SimpleNamespace(all_link_nodes=[nodes], temp_files=[],
                     link_metadata=[dict(link_nodes=nodes, metadata_text_node=first)])
         cfg = types.SimpleNamespace(message=types.SimpleNamespace(text_metadata=types.SimpleNamespace(
-              render_to_image=True, render_style='card', render_font_family='noto_sans', render_font_size=24)),
+              render_to_image=True, paginate_images=True, separate_text_sections=True, render_style='card', render_font_family='noto_sans', render_font_size=24)),
               download=types.SimpleNamespace(cache_dir=str(ROOT / 'test')), relay=types.SimpleNamespace(enabled=False))
         await scope['_render_text_metadata_output'](types.SimpleNamespace(logger=logging.getLogger()), result, [], cfg)
         self.assertEqual([n.file for n in nodes[:3]], ['page1', 'page2', 'photo'])

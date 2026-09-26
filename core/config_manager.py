@@ -344,6 +344,8 @@ class TextMetadataConfig:
     show_description: bool = True
     quote_user_message: bool = False
     render_to_image: bool = False
+    paginate_images: bool = False
+    separate_text_sections: bool = False
     render_style: str = "fresh"
     render_font_family: str = "noto_sans"
     render_font_size: int = 24
@@ -523,6 +525,7 @@ class WechatConfig:
     """微信视频号换取播放令牌所需的配置。"""
 
     yuanbao_cookie: str = ""
+    article_layout: str = "正文与图片分开发送"
 
 
 @dataclass
@@ -778,6 +781,16 @@ class ConfigManager:
                     text_metadata.get("render_to_image", False),
                     False,
                     "message.text_metadata.render_to_image",
+                ),
+                paginate_images=self._parse_bool(
+                    text_metadata.get("paginate_images", False),
+                    False,
+                    "message.text_metadata.paginate_images",
+                ),
+                separate_text_sections=self._parse_bool(
+                    text_metadata.get("separate_text_sections", False),
+                    False,
+                    "message.text_metadata.separate_text_sections",
                 ),
                 render_style=self._parse_text_render_style(
                     text_metadata.get("render_style", "清新便签")
@@ -1196,6 +1209,11 @@ class ConfigManager:
         wechat_raw = self._as_dict(config.get("wechat"))
         self.wechat = WechatConfig(
             yuanbao_cookie=str(wechat_raw.get("yuanbao_cookie", "") or "").strip(),
+            article_layout=(
+                "按原文图文穿插"
+                if wechat_raw.get("article_layout") == "按原文图文穿插"
+                else "正文与图片分开发送"
+            ),
         )
 
         # --- steam ---
@@ -1402,6 +1420,7 @@ class ConfigManager:
             parsers.append(
                 WechatParser(
                     yuanbao_cookie=self.wechat.yuanbao_cookie,
+                    article_layout=self.wechat.article_layout,
                 )
             )
         if self._enable_zhihu:

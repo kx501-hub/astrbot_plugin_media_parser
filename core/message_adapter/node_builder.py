@@ -78,7 +78,9 @@ def _resolve_output_flag(metadata: MediaMetadata, key: str, default: bool) -> bo
     return bool(value)
 
 
-def _append_media_skip_summary(text_parts: List[str], metadata: MediaMetadata) -> None:
+def _append_media_skip_summary(
+    text_parts: List[str], metadata: MediaMetadata
+) -> None:
     """将媒体跳过统计和逐项原因追加到文本节点。"""
     video_reasons = metadata.get("video_skip_reasons", []) or []
     image_reasons = metadata.get("image_skip_reasons", []) or []
@@ -99,12 +101,7 @@ def _append_media_skip_summary(text_parts: List[str], metadata: MediaMetadata) -
     warnings = [
         (idx + 1, warning) for idx, warning in enumerate(image_warnings) if warning
     ]
-    if (
-        not skipped_videos
-        and not skipped_images
-        and not skipped_audios
-        and not warnings
-    ):
+    if not skipped_videos and not skipped_images and not skipped_audios and not warnings:
         return
 
     summary_parts = []
@@ -333,7 +330,7 @@ def build_hot_comments_node(
         return None
 
     comments = [item for item in hot_comments if isinstance(item, dict)]
-    text_parts = [f"精选评论 · {len(comments)} 条", ""]
+    text_parts = [f"热评 · {len(comments)} 条", ""]
     for idx, item in enumerate(comments, start=1):
         username = str(item.get("username", "") or "").strip() or "未知用户"
         # 平台可能只提供缩写赞数；未知数量不能当作零赞。
@@ -584,9 +581,7 @@ def build_media_nodes(
             continue
         path = file_paths[position] if position < len(file_paths) else None
         if not path or not os.path.isfile(path):
-            _mark_media_failure(
-                metadata, "audio", audio_idx, "本地音频文件不存在或不可访问"
-            )
+            _mark_media_failure(metadata, "audio", audio_idx, "本地音频文件不存在或不可访问")
             continue
         token_url = (
             file_token_urls[position]
@@ -595,9 +590,7 @@ def build_media_nodes(
         )
         try:
             if audio_send_mode == "文件":
-                title = re.sub(
-                    r'[<>:"/\\|?*\x00-\x1f]', "_", str(metadata.get("title") or "音频")
-                )
+                title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(metadata.get("title") or "音频"))
                 name = (title.strip(" .")[:120] or "音频") + os.path.splitext(path)[1]
                 nodes.append(File(name=name, file=path, url=token_url or ""))
             elif token_url:
@@ -606,9 +599,7 @@ def build_media_nodes(
                 nodes.append(Record.fromFileSystem(path))
         except (OSError, TypeError, ValueError) as exc:
             logger.warning(f"构建音频节点失败: {exc}")
-            _mark_media_failure(
-                metadata, "audio", audio_idx, f"构建音频节点失败: {exc}"
-            )
+            _mark_media_failure(metadata, "audio", audio_idx, f"构建音频节点失败: {exc}")
 
     logger.debug(f"构建媒体节点完成: {url}, 共 {len(nodes)} 个节点")
     return nodes
@@ -677,9 +668,7 @@ def _build_node_parts_for_link(
     return nodes, metadata_text_node
 
 
-def is_pure_image_gallery(
-    nodes: List[Union[Plain, Image, Video, Record, File]],
-) -> bool:
+def is_pure_image_gallery(nodes: List[Union[Plain, Image, Video, Record, File]]) -> bool:
     """判断节点列表是否是纯图片图集
 
     Args:
@@ -762,7 +751,9 @@ def build_all_nodes(
         url = metadata.get("url", "")
         use_local_files = metadata.get("use_local_files", False)
 
-        logger.debug(f"构建节点[{idx}]: {url}, 使用本地文件: {use_local_files}")
+        logger.debug(
+            f"构建节点[{idx}]: {url}, 使用本地文件: {use_local_files}"
+        )
 
         link_nodes, metadata_text_node = _build_node_parts_for_link(
             metadata,
