@@ -1164,13 +1164,19 @@
     "proxy": {
         "description": "代理设置",
         "type": "object",
-        "hint": "先填写代理地址；下面各平台开关只有在地址非空时才会生效。",
+        "hint": "先填写代理地址；下面各项开关只有在地址非空时才会生效。",
         "items": {
             "address": {
                 "description": "代理地址",
                 "type": "string",
                 "hint": "格式：http://host:port 或 https://host:port",
                 "default": ""
+            },
+            "static_resources": {
+                "description": "静态资源下载使用代理",
+                "type": "bool",
+                "hint": "需要先填写“代理地址”；用于下载字体等插件静态资源。",
+                "default": false
             },
             "xiaoheihe_video": {
                 "description": "直接解析小黑盒的视频下载使用代理",

@@ -20,5 +20,6 @@
 .field.section-switch input:checked+.switch-track::after{transform:translateX(18px)}
 .field.section-switch label.toggle:focus-within .switch-track{outline:2px solid var(--accent);outline-offset:2px}
 .field.section-switch.changed{padding-left:12px;border-left:3px solid var(--accent)}
-.bubble.image-preview p+p{margin-top:1.5em}
+.bubble.image-preview p+p{margin-top:1.4em}
+.preview .bubble,.preview .bubble p{line-height:1.6}
 .bubble.image-preview.fresh{background:#fff;color:#51413f;border-color:#f4b7bd}

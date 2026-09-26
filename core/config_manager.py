@@ -493,6 +493,7 @@ class ParseRateLimitConfig:
 @dataclass
 class ProxyConfig:
     address: str = ""
+    static_resources_use_proxy: bool = False
     xiaoheihe_use_video_proxy: bool = True
     tiktok_use_proxy: bool = False
     youtube_use_proxy: bool = True
@@ -1242,6 +1243,11 @@ class ConfigManager:
         twitter_proxy = self._as_dict(proxy_raw.get("twitter"))
         self.proxy = ProxyConfig(
             address=str(proxy_raw.get("address", "") or "").strip(),
+            static_resources_use_proxy=self._parse_bool(
+                proxy_raw.get("static_resources", False),
+                False,
+                "proxy.static_resources",
+            ),
             xiaoheihe_use_video_proxy=self._parse_bool(
                 proxy_raw.get("xiaoheihe_video", True),
                 True,

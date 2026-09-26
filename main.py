@@ -120,7 +120,10 @@ class VideoParserPlugin(Star):
     async def initialize(self) -> None:
         """插件加载时检查并补全图片渲染字体。"""
         try:
-            await ensure_default_fonts()
+            proxy = self.config_manager.proxy
+            await ensure_default_fonts(
+                proxy_url=proxy.address if proxy.static_resources_use_proxy else None
+            )
         except asyncio.CancelledError:
             raise
         except FontDownloadError as exc:
@@ -453,6 +456,9 @@ class VideoParserPlugin(Star):
                         font_family=cfg.message.text_metadata.render_font_family,
                         font_size=cfg.message.text_metadata.render_font_size,
                         paginate_images=cfg.message.text_metadata.paginate_images,
+                        resource_proxy_url=(
+                            cfg.proxy.address if cfg.proxy.static_resources_use_proxy else None
+                        ),
                     )
                     build_result.temp_files.extend(paths)
                     images = []
