@@ -349,6 +349,8 @@ class TextMetadataConfig:
     render_style: str = "fresh"
     render_font_family: str = "noto_sans"
     render_font_size: int = 24
+    render_line_spacing: float = 1.6
+    render_paragraph_spacing: float = 1.4
 
     def visibility(self) -> Dict[str, bool]:
         """返回写入 metadata 的稳定字段名与展示开关。"""
@@ -493,6 +495,7 @@ class ParseRateLimitConfig:
 @dataclass
 class ProxyConfig:
     address: str = ""
+    static_resources_use_proxy: bool = False
     xiaoheihe_use_video_proxy: bool = True
     tiktok_use_proxy: bool = False
     youtube_use_proxy: bool = True
@@ -798,6 +801,12 @@ class ConfigManager:
                 render_font_family=self._parse_text_render_font_family(
                     text_metadata.get("render_font_family", "默认黑体")
                 ),
+                render_line_spacing=min(3.0, max(1.0, self._parse_non_negative_float(
+                    text_metadata.get("render_line_spacing", 1.6), 1.6
+                ))),
+                render_paragraph_spacing=min(3.0, self._parse_non_negative_float(
+                    text_metadata.get("render_paragraph_spacing", 1.4), 1.4
+                )),
                 render_font_size=min(
                     42,
                     max(
@@ -1242,6 +1251,11 @@ class ConfigManager:
         twitter_proxy = self._as_dict(proxy_raw.get("twitter"))
         self.proxy = ProxyConfig(
             address=str(proxy_raw.get("address", "") or "").strip(),
+            static_resources_use_proxy=self._parse_bool(
+                proxy_raw.get("static_resources", False),
+                False,
+                "proxy.static_resources",
+            ),
             xiaoheihe_use_video_proxy=self._parse_bool(
                 proxy_raw.get("xiaoheihe_video", True),
                 True,

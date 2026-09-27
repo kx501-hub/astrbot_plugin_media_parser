@@ -22,6 +22,8 @@ _SECRET_PATHS = frozenset({
 })
 _BOUNDS = {
     "message.text_metadata.render_font_size": (16, 42),
+    "message.text_metadata.render_line_spacing": (1.0, 3.0),
+    "message.text_metadata.render_paragraph_spacing": (0.0, 3.0),
     "message.archive.max_total_size_mb": (1, 4096),
     "download.max_concurrent": (1, None),
     "media_relay.ttl": (30, None),

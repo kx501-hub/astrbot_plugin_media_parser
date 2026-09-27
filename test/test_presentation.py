@@ -148,7 +148,8 @@ class AsyncPresentationTests(unittest.IsolatedAsyncioTestCase):
         result = types.SimpleNamespace(all_link_nodes=[nodes], temp_files=[],
                     link_metadata=[dict(link_nodes=nodes, metadata_text_node=first)])
         cfg = types.SimpleNamespace(message=types.SimpleNamespace(text_metadata=types.SimpleNamespace(
-              render_to_image=True, paginate_images=True, separate_text_sections=True, render_style='card', render_font_family='noto_sans', render_font_size=24)),
+              render_to_image=True, paginate_images=True, separate_text_sections=True, render_style='card', render_font_family='noto_sans', render_font_size=24, render_line_spacing=1.6, render_paragraph_spacing=1.4)),
+              proxy=types.SimpleNamespace(static_resources_use_proxy=False),
               download=types.SimpleNamespace(cache_dir=str(ROOT / 'test')), relay=types.SimpleNamespace(enabled=False))
         await scope['_render_text_metadata_output'](types.SimpleNamespace(logger=logging.getLogger()), result, [], cfg)
         self.assertEqual([n.file for n in nodes[:3]], ['page1', 'page2', 'photo'])

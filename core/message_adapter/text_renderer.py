@@ -32,6 +32,9 @@ async def render_text_metadata_images(
     font_family: str = DEFAULT_RENDER_FONT_FAMILY,
     timeout_seconds: int = 60,
     paginate_images: bool = False,
+    resource_proxy_url: str | None = None,
+    line_spacing: float = 1.6,
+    paragraph_spacing: float = 1.4,
 ) -> List[str]:
     """将文本元数据渲染为本地 PNG 文件。
 
@@ -45,6 +48,9 @@ async def render_text_metadata_images(
         font_family: 图片字体族。
         timeout_seconds: 渲染超时时间（秒）。
         paginate_images: 是否按最大高度自动分页，与样式及内容分组独立。
+        resource_proxy_url: 下载字体等静态资源时使用的代理地址，为空时直接连接。
+        line_spacing: 行高系数。
+        paragraph_spacing: 空行高度相对于字号的倍数。
 
     Returns:
         按阅读顺序排列的图片绝对路径。
@@ -56,7 +62,7 @@ async def render_text_metadata_images(
     if not str(text or "").strip():
         raise ValueError("没有可渲染的文本元数据")
 
-    await ensure_default_fonts()
+    await ensure_default_fonts(proxy_url=resource_proxy_url)
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     task = asyncio.create_task(
@@ -70,6 +76,8 @@ async def render_text_metadata_images(
             _normalize_style(style),
             _normalize_font_family(font_family),
             paginate_images,
+            line_spacing,
+            paragraph_spacing,
         )
     )
     try:
@@ -94,6 +102,8 @@ def _render_text_metadata_image_sync(
     style: str,
     font_family: str,
     paginate_images: bool = False,
+    line_spacing: float = 1.6,
+    paragraph_spacing: float = 1.4,
 ) -> List[str]:
     """按行绘制卡片，并在启用分页时限制单页画布高度。"""
     from PIL import Image, ImageDraw, ImageFont
@@ -121,10 +131,10 @@ def _render_text_metadata_image_sync(
         if value == TEXT_SECTION_SEPARATOR:
             block = [("", regular, color, 24, True)]
         elif not value:
-            block = [("", regular, color, max(24, round(font_size * 1.5)), False)]
+            block = [("", regular, color, round(font_size * paragraph_spacing), False)]
         else:
             block = [
-                (line, font, color, _line_height(probe, font, 1.65), False)
+                (line, font, color, _line_height(probe, font, line_spacing), False)
                 for line in _wrap_text(probe, value, font, body_width)
             ]
         # 短段落尽量保持完整，超长段落仅在行与行之间分页。

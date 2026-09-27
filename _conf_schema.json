@@ -513,6 +513,20 @@
                         "hint": "默认字体缺失或校验失败时会从独立字体仓库自动补全；ASTRBOT_MEDIA_PARSER_FONT 指定的字体仍优先使用，字体补全不可用时渲染会回退原文本。",
                         "default": "默认黑体"
                     },
+                    "render_line_spacing": {
+                        "description": "图片行间距",
+                        "type": "float",
+                        "condition": {"render_to_image": true},
+                        "hint": "行高系数，范围 1.0–3.0；数值越大，行与行越疏。",
+                        "default": 1.6
+                    },
+                    "render_paragraph_spacing": {
+                        "description": "图片段落间距",
+                        "type": "float",
+                        "condition": {"render_to_image": true},
+                        "hint": "空行高度相对于字号的倍数，范围 0–3.0；数值越大，段落间留白越多。",
+                        "default": 1.4
+                    },
                     "render_font_size": {
                         "description": "图片字体大小",
                         "type": "int",
@@ -1164,13 +1178,19 @@
     "proxy": {
         "description": "代理设置",
         "type": "object",
-        "hint": "先填写代理地址；下面各平台开关只有在地址非空时才会生效。",
+        "hint": "先填写代理地址；下面各项开关只有在地址非空时才会生效。",
         "items": {
             "address": {
                 "description": "代理地址",
                 "type": "string",
                 "hint": "格式：http://host:port 或 https://host:port",
                 "default": ""
+            },
+            "static_resources": {
+                "description": "静态资源下载使用代理",
+                "type": "bool",
+                "hint": "需要先填写“代理地址”；用于下载字体等插件静态资源。",
+                "default": false
             },
             "xiaoheihe_video": {
                 "description": "直接解析小黑盒的视频下载使用代理",

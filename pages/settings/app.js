@@ -222,6 +222,7 @@ function sync() {
 }
 function preview() {
   const target = $('message-preview');
+  target.style.zoom = $('preview-scale').value;
   target.replaceChildren();
   $('advice').replaceChildren();
   const mode = value(`parsers.${platform}`);
@@ -237,7 +238,9 @@ function preview() {
     const styles = { '科技感': 'tech', '专业严肃': 'formal', '温和卡片': 'warm' };
     if (asImage) {
       card.classList.add(styles[value('message.text_metadata.render_style')] || 'fresh');
-      card.style.fontSize = `${Math.min(28, value('message.text_metadata.render_font_size'))}px`;
+      card.style.fontSize = `${value('message.text_metadata.render_font_size')}px`;
+      card.style.setProperty('--render-line-spacing', value('message.text_metadata.render_line_spacing'));
+      card.style.setProperty('--render-paragraph-spacing', `${value('message.text_metadata.render_paragraph_spacing')}em`);
     }
     for (const [key, text] of [['show_title', '周末散步 · 城市里的小小发现'], ['show_author', '作者：旅行记录员'], ['show_timestamp', '发布时间：2026-09-26'], ['show_description', '放慢脚步，记录沿途的光影与声音。'], ['show_original_link', '原文链接：https://example.com/media']]) {
       if (value(`message.text_metadata.${key}`)) card.append(node('p', text));
@@ -301,6 +304,7 @@ async function applyResult(result, oldInstance) {
 }
 $('search').oninput = () => render();
 $('preview-platform').onchange = () => { platform = $('preview-platform').value; render(); };
+$('preview-scale').onchange = () => { if (snapshot) preview(); };
 $('reload').onclick = () => operation(async () => { adopt(await bridge.apiGet('settings')); status('已重新载入保存的配置。'); });
 $('save').onclick = () => operation(async () => {
   const result = await bridge.apiPost('settings/save', { revision: snapshot.revision, changes });
