@@ -24,6 +24,8 @@ DOUYIN_USER_AGENT = (
     "Chrome/116.0.0.0 Mobile Safari/537.36"
 )
 DOUYIN_REFERER = "https://www.douyin.com/"
+# 动图合入背景音乐时生成 DASH 候选的数量上限，避免合并不可用时逐个重复下载。
+DOUYIN_MUSIC_MERGE_CANDIDATES = 2
 URL_TRAILING_PUNCTUATION = ".,!?)]}>\"'，。！？；：）】》」"
 HTTP_URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
@@ -549,21 +551,12 @@ class DouyinParser(BaseVideoParser):
     def _extract_douyin_media_url_lists(
         self, item_info: Dict[str, Any]
     ) -> tuple[List[List[str]], List[List[str]], List[List[str]]]:
-        """提取视频段和图片段；视频存在时不再把条目降级成图集。"""
+        """提取视频段和图片段；图文条目优先，顶层视频仅在条目无媒体时使用。"""
         video_url_lists: List[List[str]] = []
         image_url_lists: List[List[str]] = []
         video_cover_groups: List[List[str]] = []
 
-        top_level_video_urls = self._extract_douyin_video_url_list(
-            item_info.get("video")
-        )
-        if top_level_video_urls:
-            video_url_lists.append(top_level_video_urls)
-            video_cover_groups.append(
-                self._extract_douyin_video_cover_url_list(item_info.get("video"))
-            )
-            return video_url_lists, image_url_lists, video_cover_groups
-
+        # 图文与 slides 的顶层 video 多为背景音乐或合成视频，不能覆盖条目中的图片与动图。
         for image_item in item_info.get("images") or []:
             slide_video_urls = self._extract_douyin_slide_video_url_list(image_item)
             if slide_video_urls:
@@ -577,7 +570,44 @@ class DouyinParser(BaseVideoParser):
             if image_urls:
                 image_url_lists.append(image_urls)
 
+        if video_url_lists or image_url_lists:
+            return video_url_lists, image_url_lists, video_cover_groups
+
+        top_level_video_urls = self._extract_douyin_video_url_list(
+            item_info.get("video")
+        )
+        if top_level_video_urls:
+            video_url_lists.append(top_level_video_urls)
+            video_cover_groups.append(
+                self._extract_douyin_video_cover_url_list(item_info.get("video"))
+            )
         return video_url_lists, image_url_lists, video_cover_groups
+
+    def _extract_douyin_music_url_list(self, item_info: Dict[str, Any]) -> List[str]:
+        """提取图文与 slides 作品的背景音乐 URL；普通视频的音轨已包含在视频中。"""
+        if not item_info.get("images"):
+            return []
+        music_info = item_info.get("music")
+        if not isinstance(music_info, dict):
+            return []
+        return [
+            url
+            for url in self._extract_nested_http_urls(music_info.get("play_url"))
+            if self._looks_like_audio_url(url)
+        ]
+
+    @staticmethod
+    def _attach_douyin_music(
+        video_url_list: List[str], music_urls: List[str]
+    ) -> List[str]:
+        """为动图追加合入背景音乐的 DASH 候选，原始候选保留在后作为兜底。"""
+        merged_urls = [
+            f"dash:{url}||{music_urls[index % len(music_urls)]}"
+            for index, url in enumerate(
+                video_url_list[:DOUYIN_MUSIC_MERGE_CANDIDATES]
+            )
+        ]
+        return merged_urls + video_url_list
 
     def _build_douyin_result_from_item(
         self, item_info: Dict[str, Any]
@@ -590,6 +620,18 @@ class DouyinParser(BaseVideoParser):
             image_url_lists,
             video_cover_groups,
         ) = self._extract_douyin_media_url_lists(item_info)
+        music_urls = self._extract_douyin_music_url_list(item_info)
+        # 使用背景音乐的混排作品中动图音轨为静音，音乐合入动图后不再单独发送。
+        if (
+            music_urls
+            and video_url_lists
+            and item_info.get("is_use_music") is not False
+        ):
+            video_url_lists = [
+                self._attach_douyin_music(url_list, music_urls)
+                for url_list in video_url_lists
+            ]
+            music_urls = []
 
         return {
             "item_id": str(item_info.get("aweme_id") or item_info.get("id") or ""),
@@ -600,6 +642,7 @@ class DouyinParser(BaseVideoParser):
             "video_url_list": video_url_lists[0] if video_url_lists else [],
             "video_cover_urls": video_cover_groups,
             "image_url_lists": image_url_lists,
+            "audio_url_lists": [music_urls] if music_urls else [],
             "is_gallery": bool(image_url_lists and not video_url_lists),
             "user_agent": DOUYIN_USER_AGENT,
         }
@@ -863,6 +906,11 @@ class DouyinParser(BaseVideoParser):
                 referer=DOUYIN_REFERER,
                 user_agent=user_agent,
             ),
+            "audio_headers": build_request_headers(
+                is_video=True,
+                referer=DOUYIN_REFERER,
+                user_agent=user_agent,
+            ),
         }
 
     async def _fetch_hot_comments(
@@ -958,6 +1006,9 @@ class DouyinParser(BaseVideoParser):
                 url_list for url_list in result.get("video_url_lists", []) if url_list
             ]
             video_cover_urls = result.get("video_cover_urls") or []
+            audio_url_lists = [
+                url_list for url_list in result.get("audio_url_lists", []) if url_list
+            ]
             if not video_url_lists:
                 video_url_list = result.get("video_url_list") or []
                 if video_url_list:
@@ -973,7 +1024,8 @@ class DouyinParser(BaseVideoParser):
 
             if is_gallery and not video_url_lists:
                 logger.debug(
-                    f"[{self.name}] parse: 检测到图片集，共{len(image_url_lists)}张图片"
+                    f"[{self.name}] parse: 检测到图片集，共{len(image_url_lists)}张图片，"
+                    f"背景音乐{len(audio_url_lists)}个"
                 )
                 return {
                     "url": display_url,
@@ -985,8 +1037,10 @@ class DouyinParser(BaseVideoParser):
                     "video_urls": [],
                     "video_cover_urls": [],
                     "image_urls": image_url_lists,
+                    "audio_urls": audio_url_lists,
                     "image_headers": headers["image_headers"],
                     "video_headers": headers["video_headers"],
+                    "audio_headers": headers["audio_headers"],
                     **comment_fields,
                 }
 
@@ -1004,8 +1058,10 @@ class DouyinParser(BaseVideoParser):
                 "video_urls": video_url_lists,
                 "video_cover_urls": video_cover_urls,
                 "image_urls": image_url_lists,
+                "audio_urls": audio_url_lists,
                 "image_headers": headers["image_headers"],
                 "video_headers": headers["video_headers"],
+                "audio_headers": headers["audio_headers"],
                 **comment_fields,
             }
             logger.debug(

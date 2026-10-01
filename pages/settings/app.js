@@ -10,7 +10,7 @@ const node = (tag, text = '', cls = '') => {
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sectionSwitches = new Set([
   'message.text_metadata.render_to_image',
-  'message.text_metadata.paginate_images',
+  'message.text_metadata.render_paginate',
   'message.text_metadata.separate_text_sections',
   'message.opening.enable',
   'translation.enable',
@@ -18,6 +18,7 @@ const sectionSwitches = new Set([
   'permissions.blacklist.enable',
   'bilibili_enhanced.use_cookie',
   'media_relay.enable',
+  'message.media_display.interleave_images',
   'bilibili_enhanced.admin_assist.enable',
 ]);
 const views = {
@@ -227,9 +228,9 @@ function preview() {
   $('advice').replaceChildren();
   const mode = value(`parsers.${platform}`);
   const asImage = value('message.text_metadata.render_to_image');
-  const paginate = value('message.text_metadata.paginate_images');
+  const paginate = value('message.text_metadata.render_paginate');
   const separate = value('message.text_metadata.separate_text_sections');
-  const interleaved = platform === 'wechat' && value('wechat.article_layout') === '按原文图文穿插'
+  const interleaved = value('message.media_display.interleave_images')
     && mode !== '仅富媒体' && value('message.text_metadata.show_description');
   if (mode === '关闭') { target.append(node('p', '此平台已关闭自动解析。', 'empty')); return; }
   if (value('message.opening.enable')) target.append(node('div', value('message.opening.content'), 'bubble'));
@@ -247,7 +248,7 @@ function preview() {
     }
     target.append(card);
     if (interleaved) {
-      if (mode !== '仅文本') target.append(node('div', '▧ 公众号正文配图', 'bubble media'));
+      if (mode !== '仅文本') target.append(node('div', '▧ 正文配图（按原文位置）', 'bubble media'));
       const continuation = card.cloneNode(false);
       continuation.append(node('p', '配图之后的正文：走到山间，阳光穿过树叶。'));
       continuation.append(node('p', '另一个段落：停下来喝一杯茶，再继续往前走。'));
@@ -277,7 +278,6 @@ function preview() {
       paginate ? '长图自动分页已启用' : '长图自动分页未启用',
       interleaved ? '文字按配图位置分段渲染' : separate ? '文字栏目分开渲染' : '文字栏目合并渲染',
     ] : ['纯文字分开发送']),
-    ...(platform === 'wechat' ? [`公众号文章排版：${value('wechat.article_layout')}`] : []),
   ].map(text => node('p', text, 'note')));
 }
 async function operation(action) {
